@@ -1,14 +1,38 @@
 {
     "full-dynamics": {
-        "m11": 22.539047835019762,
-        "m22": 16.52498167478788,
-        "m33": 2.451874384175241,
-        "Xu": 13.295024256084622,
-        "Xuu": 15.645269946067888,
-        "Yv": 64.25636949455863,
-        "Yvv": 18.610902174715264,
-        "Nr": 5.9638427783585115,
-        "Nrr": 2.9912505913558527,
+        "m": 23.344,
+        "Iz": 2.923312,
+        "X_dot_u": -0.5060195203638536,
+        "Y_dot_v": -6.477205112801826,
+        "N_dot_r": -0.2609654404925674,
+        "Xu": 13.532771257291914,
+        "Xuu": 15.413655684621494,
+        "Yv": 71.49624938994457,
+        "Yvv": 2.2496978529726888,
+        "Nr": 6.0451250704911175,
+        "Nrr": 2.924955801139209,
         "description": "Standard Fossen 3DOF 9-parameter model optimized via Least Squares + Gradient Descent"
+    },
+    "linear-6-parameters": {
+        "m": 23.344,
+        "Iz": 2.923312,
+        "X_dot_u": -5.265479868295614,
+        "Y_dot_v": -11.475428362047317,
+        "N_dot_r": -0.22011103640755225,
+        "Xu": 35.93720880969563,
+        "Yv": 57.348951052401134,
+        "Nr": 9.369220901577382,
+        "description": "Fossen 3DOF 6-parameter linear-damping model estimated by least squares"
+    },
+    "symmetric-5-parameters": {
+        "m": 23.344,
+        "Iz": 2.923312,
+        "X_dot_u": 0.0,
+        "Y_dot_v": 0.0,
+        "N_dot_r": 0.8955557826938436,
+        "Xu": 33.833371625072445,
+        "Yv": 74.04225248361782,
+        "Nr": 11.466349754063387,
+        "description": "Fossen 3DOF model with X_dot_u = Y_dot_v = 0 estimated by least squares"
     }
 }

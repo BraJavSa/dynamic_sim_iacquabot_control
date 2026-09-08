@@ -4,7 +4,6 @@ import os
 import csv
 import math
 import time
-import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.parameter import Parameter
@@ -24,6 +23,7 @@ class DynamicsExcitationNode(Node):
         
         self.rate = float(self.get_parameter('rate').value)
         self.dt = 1.0 / self.rate
+        self.data_dir = self.resolve_data_dir()
         
         # Resolve CSV path
         user_csv_path = self.get_parameter('csv_path').value
@@ -82,9 +82,7 @@ class DynamicsExcitationNode(Node):
         self.data_roll = []
         self.data_pitch = []
         self.data_yaw = []
-        # Raw odometry twist is retained for diagnostics only. The fields
-        # vx, vy, vz, wx, wy and wz saved at the end are reconstructed from
-        # pose samples so angular discontinuities can be unwrapped first.
+        # Velocities supplied by the simulator's odometry plugin.
         self.data_vx_odom = []
         self.data_vy_odom = []
         self.data_vz_odom = []
@@ -104,19 +102,26 @@ class DynamicsExcitationNode(Node):
     def resolve_csv_path(self, user_path):
         if user_path and os.path.exists(user_path):
             return user_path
-        
+        return os.path.join(self.data_dir, 'DynamicModel', 'experiment_cmd_30Hz_simple.csv')
+
+    def resolve_data_dir(self):
         script_dir = os.path.dirname(os.path.realpath(__file__))
         candidates = [
-            os.path.join(script_dir, '..', 'data', 'DynamicModel', 'experiment_cmd_30Hz_simple.csv'),
-            os.path.join(script_dir, 'data', 'DynamicModel', 'experiment_cmd_30Hz_simple.csv'),
-            os.path.abspath(os.path.join(script_dir, '..', '..', '..', 'src', 'dynamic_sim_iacquabot_control', 'data', 'DynamicModel', 'experiment_cmd_30Hz_simple.csv'))
+            os.path.join(
+                script_dir, '..', '..', '..', '..', 'src',
+                'dynamic_sim_iacquabot_control', 'data'
+            ),
+            os.path.join(script_dir, '..', 'data'),
+            os.path.join(script_dir, '..', '..', 'data'),
         ]
-        for cand in candidates:
-            cand_norm = os.path.normpath(cand)
-            if os.path.exists(cand_norm):
-                return cand_norm
-        
-        return os.path.join(script_dir, '..', 'data', 'DynamicModel', 'experiment_cmd_30Hz_simple.csv')
+        for candidate in candidates:
+            candidate = os.path.abspath(candidate)
+            command_file = os.path.join(
+                candidate, 'DynamicModel', 'experiment_cmd_30Hz_simple.csv'
+            )
+            if os.path.isfile(command_file):
+                return candidate
+        return os.path.abspath(os.path.join(script_dir, '..', 'data'))
 
     def load_csv_commands(self, filepath):
         cmds_left = []
@@ -218,44 +223,6 @@ class DynamicsExcitationNode(Node):
         self.pub_rf.publish(msg_r)
         self.pub_rr.publish(msg_r)
 
-    def reconstruct_velocities_from_pose(self):
-        """Differentiate pose after unwrapping angles, then express u,v in body."""
-        t = np.asarray(self.data_t, dtype=float)
-        if t.size < 3:
-            raise ValueError('At least three pose samples are required to reconstruct velocities.')
-        if np.any(np.diff(t) <= 0.0):
-            raise ValueError('Simulation timestamps must be strictly increasing.')
-
-        x = np.asarray(self.data_x, dtype=float)
-        y = np.asarray(self.data_y, dtype=float)
-        z = np.asarray(self.data_z, dtype=float)
-        roll_unwrapped = np.unwrap(np.asarray(self.data_roll, dtype=float))
-        pitch_unwrapped = np.unwrap(np.asarray(self.data_pitch, dtype=float))
-        yaw_unwrapped = np.unwrap(np.asarray(self.data_yaw, dtype=float))
-
-        x_dot = np.gradient(x, t, edge_order=2)
-        y_dot = np.gradient(y, t, edge_order=2)
-        z_dot = np.gradient(z, t, edge_order=2)
-        roll_dot = np.gradient(roll_unwrapped, t, edge_order=2)
-        pitch_dot = np.gradient(pitch_unwrapped, t, edge_order=2)
-        yaw_dot = np.gradient(yaw_unwrapped, t, edge_order=2)
-
-        # x,y are world-frame positions. Rotate their derivative into the
-        # body frame so vx=u and vy=v match the Fossen convention.
-        cos_yaw = np.cos(yaw_unwrapped)
-        sin_yaw = np.sin(yaw_unwrapped)
-        u = cos_yaw * x_dot + sin_yaw * y_dot
-        v = -sin_yaw * x_dot + cos_yaw * y_dot
-
-        return {
-            'vx': u.tolist(), 'vy': v.tolist(), 'vz': z_dot.tolist(),
-            'wx': roll_dot.tolist(), 'wy': pitch_dot.tolist(), 'wz': yaw_dot.tolist(),
-            'roll_unwrapped': roll_unwrapped.tolist(),
-            'pitch_unwrapped': pitch_unwrapped.tolist(),
-            'yaw_unwrapped': yaw_unwrapped.tolist(),
-            'x_dot_world': x_dot.tolist(), 'y_dot_world': y_dot.tolist()
-        }
-
     def stop_and_save(self):
         if self.is_finished:
             return
@@ -264,18 +231,17 @@ class DynamicsExcitationNode(Node):
         self.get_logger().info('Experiment completed or stopped. Stopping thrusters...')
         self.publish_thruster_cmds(0.0, 0.0)
 
-        try:
-            reconstructed = self.reconstruct_velocities_from_pose()
-            self.get_logger().info('Velocities reconstructed from pose with unwrapped Euler angles.')
-        except ValueError as exc:
-            self.get_logger().error(f'Pose reconstruction failed: {exc}. Saving raw odometry twist instead.')
-            reconstructed = {
-                'vx': self.data_vx_odom, 'vy': self.data_vy_odom, 'vz': self.data_vz_odom,
-                'wx': self.data_wx_odom, 'wy': self.data_wy_odom, 'wz': self.data_wz_odom,
-                'roll_unwrapped': self.data_roll, 'pitch_unwrapped': self.data_pitch,
-                'yaw_unwrapped': self.data_yaw, 'x_dot_world': self.data_vx_odom,
-                'y_dot_world': self.data_vy_odom
-            }
+        self.get_logger().info('Using linear and angular velocities supplied by the odometry plugin.')
+
+        # The plugin publishes linear velocity in the body frame. Keep the
+        # legacy world-frame columns by rotating only the linear velocity.
+        x_dot_world = []
+        y_dot_world = []
+        for yaw, vx, vy in zip(self.data_yaw, self.data_vx_odom, self.data_vy_odom):
+            cos_yaw = math.cos(yaw)
+            sin_yaw = math.sin(yaw)
+            x_dot_world.append(cos_yaw * vx - sin_yaw * vy)
+            y_dot_world.append(sin_yaw * vx + cos_yaw * vy)
 
         data_dict = {
             't': self.data_t,
@@ -285,13 +251,13 @@ class DynamicsExcitationNode(Node):
             'roll': self.data_roll,
             'pitch': self.data_pitch,
             'yaw': self.data_yaw,
-            'vx': reconstructed['vx'], 'vy': reconstructed['vy'], 'vz': reconstructed['vz'],
-            'wx': reconstructed['wx'], 'wy': reconstructed['wy'], 'wz': reconstructed['wz'],
-            'roll_unwrapped': reconstructed['roll_unwrapped'],
-            'pitch_unwrapped': reconstructed['pitch_unwrapped'],
-            'yaw_unwrapped': reconstructed['yaw_unwrapped'],
-            'x_dot_world': reconstructed['x_dot_world'],
-            'y_dot_world': reconstructed['y_dot_world'],
+            'vx': self.data_vx_odom, 'vy': self.data_vy_odom, 'vz': self.data_vz_odom,
+            'wx': self.data_wx_odom, 'wy': self.data_wy_odom, 'wz': self.data_wz_odom,
+            'roll_unwrapped': self.data_roll,
+            'pitch_unwrapped': self.data_pitch,
+            'yaw_unwrapped': self.data_yaw,
+            'x_dot_world': x_dot_world,
+            'y_dot_world': y_dot_world,
             'vx_odom_raw': self.data_vx_odom, 'vy_odom_raw': self.data_vy_odom,
             'vz_odom_raw': self.data_vz_odom, 'wx_odom_raw': self.data_wx_odom,
             'wy_odom_raw': self.data_wy_odom, 'wz_odom_raw': self.data_wz_odom,
@@ -299,9 +265,7 @@ class DynamicsExcitationNode(Node):
             'u_right': self.data_u_right
         }
 
-        script_dir = os.path.dirname(os.path.realpath(__file__))
-        package_dir = os.path.abspath(os.path.join(script_dir, '..'))
-        data_dir = os.path.join(package_dir, 'data')
+        data_dir = self.data_dir
 
         try:
             os.makedirs(data_dir, exist_ok=True)

@@ -2,13 +2,15 @@
 
 import os
 import json
+import csv
+from pathlib import Path
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from scipy.io import loadmat
-from scipy.signal import savgol_filter
+from matplotlib.ticker import FormatStrFormatter
 from scipy.optimize import lsq_linear, minimize
+from scipy.signal import savgol_filter
 
 # Set aesthetic publication style
 plt.rcParams['font.sans-serif'] = 'DejaVu Sans'
@@ -28,6 +30,10 @@ MOTOR_TEMPLATE = {
 }
 
 PARAM_NAMES_FULL = ['m11', 'm22', 'm33', 'Xu', 'Xuu', 'Yv', 'Yvv', 'Nr', 'Nrr']
+PARAM_NAMES_LINEAR = ['m11', 'm22', 'm33', 'Xu', 'Yv', 'Nr']
+PARAM_NAMES_SYMMETRIC = ['N_dot_r', 'Xu', 'Yv', 'Nr']
+RIGID_MASS = 23.344
+RIGID_INERTIA_Z = 2.923312
 
 def branch_thrust(cmd, params):
     return params['A'] + (params['K'] - params['A']) / (params['C'] + np.exp(-params['B'] * (cmd - params['M']))) ** (1.0 / params['v'])
@@ -68,18 +74,6 @@ def cmd_to_thrust_forces(u_left, u_right, motor=None):
     Tr = -y_FR * T_FR - y_FL * T_FL - y_BR * T_BR - y_BL * T_BL
     return Tu, Tr
 
-def clean_outliers(sig, max_val=5.0):
-    outliers = np.abs(sig) > max_val
-    if np.any(outliers):
-        cleaned = sig.copy()
-        for i in np.where(outliers)[0]:
-            valid_indices = np.where(~outliers)[0]
-            if len(valid_indices) > 0:
-                nearest_valid = valid_indices[np.argmin(np.abs(valid_indices - i))]
-                cleaned[i] = sig[nearest_valid]
-        return cleaned
-    return sig
-
 def build_phi_tau_full(acc_u, acc_v, acc_r, u, v, r, Tu, Tr):
     N = len(u)
     Phi_list, Tau_list = [], []
@@ -109,6 +103,52 @@ def build_phi_tau_full(acc_u, acc_v, acc_r, u, v, r, Tu, Tr):
         Phi_list.append(row_r)
         Tau_list.append(Tr[k])
     return np.array(Phi_list), np.array(Tau_list)
+
+def build_phi_tau_linear(acc_u, acc_v, acc_r, u, v, r, Tu, Tr):
+    phi_list, tau_list = [], []
+    for k in range(len(u)):
+        row_u = np.zeros(6)
+        row_u[0] = acc_u[k]
+        row_u[1] = -v[k] * r[k]
+        row_u[3] = u[k]
+        phi_list.append(row_u)
+        tau_list.append(Tu[k])
+
+        row_v = np.zeros(6)
+        row_v[0] = u[k] * r[k]
+        row_v[1] = acc_v[k]
+        row_v[4] = v[k]
+        phi_list.append(row_v)
+        tau_list.append(0.0)
+
+        row_r = np.zeros(6)
+        row_r[0] = -u[k] * v[k]
+        row_r[1] = u[k] * v[k]
+        row_r[2] = acc_r[k]
+        row_r[5] = r[k]
+        phi_list.append(row_r)
+        tau_list.append(Tr[k])
+    return np.array(phi_list), np.array(tau_list)
+
+def build_phi_tau_symmetric(acc_u, acc_v, acc_r, u, v, r, Tu, Tr):
+    phi_list, tau_list = [], []
+    for k in range(len(u)):
+        row_u = np.zeros(4)
+        row_u[1] = u[k]
+        phi_list.append(row_u)
+        tau_list.append(Tu[k] - RIGID_MASS * (acc_u[k] - v[k] * r[k]))
+
+        row_v = np.zeros(4)
+        row_v[2] = v[k]
+        phi_list.append(row_v)
+        tau_list.append(-RIGID_MASS * (acc_v[k] + u[k] * r[k]))
+
+        row_r = np.zeros(4)
+        row_r[0] = -acc_r[k]
+        row_r[3] = r[k]
+        phi_list.append(row_r)
+        tau_list.append(Tr[k] - RIGID_INERTIA_Z * acc_r[k])
+    return np.array(phi_list), np.array(tau_list)
 
 def rk4_integrate_full(t, u0, v0, r0, Tu, Tr, d):
     N = len(t)
@@ -149,38 +189,123 @@ def rk4_integrate_full(t, u0, v0, r0, Tu, Tr, d):
         r_sim[k + 1] = rk + dt / 6.0 * (dr1 + 2.0 * dr2 + 2.0 * dr3 + dr4)
     return u_sim, v_sim, r_sim
 
+def full_parameters(parameter_names, values):
+    parameters = dict(zip(parameter_names, values))
+    if parameter_names == PARAM_NAMES_FULL:
+        return {
+            'm11': parameters['m11'], 'm22': parameters['m22'],
+            'm33': parameters['m33'], 'Xu': parameters['Xu'],
+            'Xuu': parameters['Xuu'], 'Yv': parameters['Yv'],
+            'Yvv': parameters['Yvv'], 'Nr': parameters['Nr'],
+            'Nrr': parameters['Nrr'],
+        }
+    if parameter_names == PARAM_NAMES_LINEAR:
+        return {
+            'm11': parameters['m11'], 'm22': parameters['m22'],
+            'm33': parameters['m33'], 'Xu': parameters['Xu'],
+            'Xuu': 0.0, 'Yv': parameters['Yv'], 'Yvv': 0.0,
+            'Nr': parameters['Nr'], 'Nrr': 0.0,
+        }
+    return {
+        'm11': RIGID_MASS, 'm22': RIGID_MASS,
+        'm33': RIGID_INERTIA_Z - parameters['N_dot_r'], 'Xu': parameters['Xu'],
+        'Xuu': 0.0, 'Yv': parameters['Yv'], 'Yvv': 0.0,
+        'Nr': parameters['Nr'], 'Nrr': 0.0,
+    }
+
+def physical_parameters(parameter_names, values):
+    parameters = dict(zip(parameter_names, values))
+    if parameter_names == PARAM_NAMES_FULL:
+        return {
+            'm': RIGID_MASS, 'Iz': RIGID_INERTIA_Z,
+            'X_dot_u': parameters['m11'] - RIGID_MASS,
+            'Y_dot_v': parameters['m22'] - RIGID_MASS,
+            'N_dot_r': parameters['m33'] - RIGID_INERTIA_Z,
+            'Xu': parameters['Xu'], 'Xuu': parameters['Xuu'],
+            'Yv': parameters['Yv'], 'Yvv': parameters['Yvv'],
+            'Nr': parameters['Nr'], 'Nrr': parameters['Nrr'],
+        }
+    if parameter_names == PARAM_NAMES_LINEAR:
+        return {
+            'm': RIGID_MASS, 'Iz': RIGID_INERTIA_Z,
+            'X_dot_u': parameters['m11'] - RIGID_MASS,
+            'Y_dot_v': parameters['m22'] - RIGID_MASS,
+            'N_dot_r': parameters['m33'] - RIGID_INERTIA_Z,
+            'Xu': parameters['Xu'], 'Yv': parameters['Yv'],
+            'Nr': parameters['Nr'],
+        }
+    return {
+        'm': RIGID_MASS, 'Iz': RIGID_INERTIA_Z,
+        'X_dot_u': 0.0, 'Y_dot_v': 0.0,
+        'N_dot_r': parameters['N_dot_r'],
+        'Xu': parameters['Xu'], 'Yv': parameters['Yv'],
+        'Nr': parameters['Nr'],
+    }
+
 def compute_metrics(y_real, y_sim):
     rms_val = float(np.sqrt(np.mean((y_real - y_sim) ** 2)))
     mae_val = float(np.mean(np.abs(y_real - y_sim)))
     return rms_val, mae_val
 
+def clean_outliers(signal, max_value=5.0):
+    outliers = np.abs(signal) > max_value
+    if not np.any(outliers):
+        return signal
+
+    cleaned = signal.copy()
+    valid_indices = np.where(~outliers)[0]
+    for index in np.where(outliers)[0]:
+        if valid_indices.size:
+            nearest_valid = valid_indices[np.argmin(np.abs(valid_indices - index))]
+            cleaned[index] = signal[nearest_valid]
+    return cleaned
+
+def load_latest_dataset(data_dir):
+    csv_files = list(Path(data_dir).rglob('wamvsim_*.csv'))
+    if not csv_files:
+        raise FileNotFoundError(f'No identification CSV files found in: {data_dir}')
+
+    csv_file = max(csv_files, key=lambda path: path.stat().st_mtime)
+    with csv_file.open(mode='r', newline='') as file:
+        reader = csv.DictReader(file)
+        rows = list(reader)
+
+    required_fields = {'t', 'vx', 'vy', 'wz', 'u_left', 'u_right'}
+    missing_fields = required_fields.difference(reader.fieldnames or [])
+    if missing_fields:
+        missing = ', '.join(sorted(missing_fields))
+        raise ValueError(f'Dataset {csv_file} is missing columns: {missing}')
+    if not rows:
+        raise ValueError(f'Dataset is empty: {csv_file}')
+
+    values = {
+        field: np.asarray([float(row[field]) for row in rows], dtype=float)
+        for field in required_fields
+    }
+    return csv_file, values
+
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     data_dir = os.path.join(script_dir, '..', 'data')
-    
-    mat_file = os.path.join(data_dir, 'wamvsim_20260908_102152.mat')
-    if not os.path.isfile(mat_file):
-        raise FileNotFoundError(f'Required identification dataset not found: {mat_file}')
-    print(f'Using identification dataset: {mat_file}')
-    
-    mat_data = loadmat(mat_file)
-    u_raw = clean_outliers(mat_data['vx'].flatten())
-    v_raw = clean_outliers(mat_data['vy'].flatten())
-    r_raw = clean_outliers(mat_data['wz'].flatten())
-    
+    csv_file, dataset = load_latest_dataset(data_dir)
+    print(f'Using latest identification dataset: {csv_file}')
+
+    u_raw = clean_outliers(dataset['vx'])
+    v_raw = clean_outliers(dataset['vy'])
+    r_raw = clean_outliers(dataset['wz'])
+
     u = savgol_filter(u_raw, 25, 2)
     v = savgol_filter(v_raw, 25, 2)
     r = savgol_filter(r_raw, 25, 2)
     
-    dt = 1.0 / 30.0
     N_samples = len(u)
-    t_arr = mat_data['t'].flatten() if 't' in mat_data else np.arange(N_samples) * dt
+    t_arr = dataset['t']
     
     acc_u = np.gradient(u, t_arr)
     acc_v = np.gradient(v, t_arr)
     acc_r = np.gradient(r, t_arr)
 
-    Tu_arr, Tr_arr = cmd_to_thrust_forces(mat_data['u_left'].flatten(), mat_data['u_right'].flatten())
+    Tu_arr, Tr_arr = cmd_to_thrust_forces(dataset['u_left'], dataset['u_right'])
 
     train_idx = t_arr <= 240.0 if t_arr[-1] >= 260.0 else np.ones(N_samples, dtype=bool)
 
@@ -192,6 +317,26 @@ def main():
     ub1 = [500.0, 500.0, 500.0, 500.0, 500.0, 500.0, 500.0, 500.0, 5000.0]
     theta_ls = lsq_linear(Phi1, Tau1, bounds=(lb1, ub1)).x
     print("Least Squares estimation completed.")
+
+    Phi6, Tau6 = build_phi_tau_linear(
+        acc_u[train_idx], acc_v[train_idx], acc_r[train_idx],
+        u[train_idx], v[train_idx], r[train_idx],
+        Tu_arr[train_idx], Tr_arr[train_idx]
+    )
+    lb6 = [10.0, 10.0, 2.0, 0.0, 0.0, 0.0]
+    ub6 = [500.0, 500.0, 500.0, 500.0, 500.0, 500.0]
+    theta6 = lsq_linear(Phi6, Tau6, bounds=(lb6, ub6)).x
+    print("6-parameter least squares estimation completed.")
+
+    Phi5, Tau5 = build_phi_tau_symmetric(
+        acc_u[train_idx], acc_v[train_idx], acc_r[train_idx],
+        u[train_idx], v[train_idx], r[train_idx],
+        Tu_arr[train_idx], Tr_arr[train_idx]
+    )
+    lb5 = [-500.0, 0.0, 0.0, 0.0]
+    ub5 = [500.0, 500.0, 500.0, 500.0]
+    theta5 = lsq_linear(Phi5, Tau5, bounds=(lb5, ub5)).x
+    print("5-parameter least squares estimation completed.")
 
     # 2. Gradient-based Optimization (Gradient Descent / L-BFGS-B Output Error Method)
     t_train = t_arr[train_idx]
@@ -218,12 +363,24 @@ def main():
     theta_opt = res_opt.x
     print("Gradient-based optimization completed.")
 
-    dict_full = {name: float(theta_opt[i]) for i, name in enumerate(PARAM_NAMES_FULL)}
+    dict_full = physical_parameters(PARAM_NAMES_FULL, theta_opt)
     dict_full['description'] = "Standard Fossen 3DOF 9-parameter model optimized via Least Squares + Gradient Descent"
+
+    dict_linear = physical_parameters(PARAM_NAMES_LINEAR, theta6)
+    dict_linear['description'] = 'Fossen 3DOF 6-parameter linear-damping model estimated by least squares'
+
+    dict_symmetric = physical_parameters(PARAM_NAMES_SYMMETRIC, theta5)
+    dict_symmetric['description'] = 'Fossen 3DOF model with X_dot_u = Y_dot_v = 0 estimated by least squares'
+
+    full_linear = full_parameters(PARAM_NAMES_LINEAR, theta6)
+    full_symmetric = full_parameters(PARAM_NAMES_SYMMETRIC, theta5)
+    full_dynamics = full_parameters(PARAM_NAMES_FULL, theta_opt)
 
     # Export JSON
     all_models_dict = {
-        "full-dynamics": dict_full
+        "full-dynamics": dict_full,
+        "linear-6-parameters": dict_linear,
+        "symmetric-5-parameters": dict_symmetric,
     }
     json_path = os.path.join(script_dir, 'identified_models.json')
     with open(json_path, 'w') as f:
@@ -232,48 +389,88 @@ def main():
 
     # Full validation / simulation over entire dataset
     u_c9, v_c9, r_c9 = rk4_integrate_full(
-        t_arr, u_raw[0], v_raw[0], r_raw[0], Tu_arr, Tr_arr, dict_full
+        t_arr, u[0], v[0], r[0], Tu_arr, Tr_arr, full_dynamics
+    )
+    u_c6, v_c6, r_c6 = rk4_integrate_full(
+        t_arr, u[0], v[0], r[0], Tu_arr, Tr_arr, full_linear
+    )
+    u_c5, v_c5, r_c5 = rk4_integrate_full(
+        t_arr, u[0], v[0], r[0], Tu_arr, Tr_arr, full_symmetric
     )
 
     rms_u, _ = compute_metrics(u_raw, u_c9)
     rms_v, _ = compute_metrics(v_raw, v_c9)
     rms_r, _ = compute_metrics(r_raw, r_c9)
+    rms_u6, _ = compute_metrics(u_raw, u_c6)
+    rms_v6, _ = compute_metrics(v_raw, v_c6)
+    rms_r6, _ = compute_metrics(r_raw, r_c6)
+    rms_u5, _ = compute_metrics(u_raw, u_c5)
+    rms_v5, _ = compute_metrics(v_raw, v_c5)
+    rms_r5, _ = compute_metrics(r_raw, r_c5)
 
-    # Plot Measured vs Simulated (Optimized 9-parameter model)
-    fig, axs = plt.subplots(3, 1, figsize=(10, 8), sharex=True, dpi=300)
-    
-    c_real = '#1F2937'   # Dark Charcoal / Navy
-    c_sim = '#2563EB'    # Vivid Blue
+    plt.rcParams.update({
+        'font.size': 10.0,
+        'axes.labelsize': 10.0,
+        'xtick.labelsize': 8.0,
+        'ytick.labelsize': 8.0,
+        'font.family': 'serif',
+        'mathtext.fontset': 'cm',
+        'figure.facecolor': 'white'
+    })
 
-    # 1. Surge Velocity (u)
-    axs[0].plot(t_arr, u_raw, color=c_real, linestyle='-', linewidth=1.5, label='Measured (Real)', alpha=0.85)
-    axs[0].plot(t_arr, u_c9, color=c_sim, linestyle='--', linewidth=1.8, label=f'Optimized Sim 9-param (RMS = {rms_u:.3f} m/s)')
-    axs[0].set_ylabel('Surge $u$ [m/s]', fontsize=12, fontweight='bold')
-    axs[0].set_title('USV 9-Parameter Model (LS + Gradient Descent): Measured vs. Simulated', fontsize=14, fontweight='bold', pad=12)
-    axs[0].grid(True, linestyle=':', alpha=0.6)
-    axs[0].legend(loc='upper right', frameon=True, facecolor='#FFFFFF', edgecolor='#CCCCCC', fontsize=10)
-    axs[0].set_xlim(t_arr[0], t_arr[-1])
+    fig, axs = plt.subplots(2, 2, figsize=(8.0, 5.2), dpi=300)
+    c_real, c_5param, c_6param, c_9param = '#000000', '#B22222', '#003366', '#2E8B57'
+    line_width = 1.2
+    t_max = t_arr[-1]
 
-    # 2. Sway Velocity (v)
-    axs[1].plot(t_arr, v_raw, color=c_real, linestyle='-', linewidth=1.5, label='Measured (Real)', alpha=0.85)
-    axs[1].plot(t_arr, v_c9, color=c_sim, linestyle='--', linewidth=1.8, label=f'Optimized Sim 9-param (RMS = {rms_v:.3f} m/s)')
-    axs[1].set_ylabel('Sway $v$ [m/s]', fontsize=12, fontweight='bold')
-    axs[1].grid(True, linestyle=':', alpha=0.6)
-    axs[1].legend(loc='upper right', frameon=True, facecolor='#FFFFFF', edgecolor='#CCCCCC', fontsize=10)
-    axs[1].set_xlim(t_arr[0], t_arr[-1])
+    axs[0, 0].plot(t_arr, u_raw, color=c_real, linestyle='-', label='Real', linewidth=line_width)
+    axs[0, 0].plot(t_arr, u_c5, color=c_5param, linestyle=':', label='5-Param', linewidth=line_width)
+    axs[0, 0].plot(t_arr, u_c6, color=c_6param, linestyle='-.', label='6-Param', linewidth=line_width)
+    axs[0, 0].plot(t_arr, u_c9, color=c_9param, linestyle='--', label='9-Param', linewidth=line_width)
+    axs[0, 0].set_ylabel(r'Surge Velocity $u \ [\mathrm{m/s}]$')
+    axs[0, 0].set_xlabel(r'Time $t \ [\mathrm{s}]$')
 
-    # 3. Yaw Rate (r)
-    axs[2].plot(t_arr, r_raw, color=c_real, linestyle='-', linewidth=1.5, label='Measured (Real)', alpha=0.85)
-    axs[2].plot(t_arr, r_c9, color=c_sim, linestyle='--', linewidth=1.8, label=f'Optimized Sim 9-param (RMS = {rms_r:.3f} rad/s)')
-    axs[2].set_ylabel('Yaw Rate $r$ [rad/s]', fontsize=12, fontweight='bold')
-    axs[2].set_xlabel('Time [s]', fontsize=12, fontweight='bold')
-    axs[2].grid(True, linestyle=':', alpha=0.6)
-    axs[2].legend(loc='upper right', frameon=True, facecolor='#FFFFFF', edgecolor='#CCCCCC', fontsize=10)
-    axs[2].set_xlim(t_arr[0], t_arr[-1])
+    axs[0, 1].plot(t_arr, v_raw, color=c_real, linestyle='-', label='Real', linewidth=line_width)
+    axs[0, 1].plot(t_arr, v_c5, color=c_5param, linestyle=':', label='5-Param', linewidth=line_width)
+    axs[0, 1].plot(t_arr, v_c6, color=c_6param, linestyle='-.', label='6-Param', linewidth=line_width)
+    axs[0, 1].plot(t_arr, v_c9, color=c_9param, linestyle='--', label='9-Param', linewidth=line_width)
+    axs[0, 1].set_ylabel(r'Sway Velocity $v \ [\mathrm{m/s}]$')
+    axs[0, 1].set_xlabel(r'Time $t \ [\mathrm{s}]$')
 
-    plt.tight_layout()
-    plot_path = os.path.join(script_dir, 'velocity_comparison_9_parameters_optimized.png')
-    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+    axs[1, 0].plot(t_arr, r_raw, color=c_real, linestyle='-', label='Real', linewidth=line_width)
+    axs[1, 0].plot(t_arr, r_c5, color=c_5param, linestyle=':', label='5-Param', linewidth=line_width)
+    axs[1, 0].plot(t_arr, r_c6, color=c_6param, linestyle='-.', label='6-Param', linewidth=line_width)
+    axs[1, 0].plot(t_arr, r_c9, color=c_9param, linestyle='--', label='9-Param', linewidth=line_width)
+    axs[1, 0].set_ylabel(r'Yaw Rate $r \ [\mathrm{rad/s}]$')
+    axs[1, 0].set_xlabel(r'Time $t \ [\mathrm{s}]$')
+
+    for axis in (axs[0, 0], axs[0, 1], axs[1, 0]):
+        axis.set_xlim(0, t_max)
+        axis.grid(True, linestyle='--', alpha=0.7)
+        axis.yaxis.set_major_formatter(FormatStrFormatter('%.1f'))
+
+    categories = [
+        'Surge Velocity\n' + r'$u \ [\mathrm{m/s}]$',
+        'Sway Velocity\n' + r'$v \ [\mathrm{m/s}]$',
+        'Yaw Rate\n' + r'$r \ [\mathrm{rad/s}]$'
+    ]
+    x_pos = np.arange(len(categories))
+    bar_width = 0.24
+    axs[1, 1].bar(x_pos - bar_width, [rms_u5, rms_v5, rms_r5], bar_width, color=c_5param, edgecolor='black')
+    axs[1, 1].bar(x_pos, [rms_u6, rms_v6, rms_r6], bar_width, color=c_6param, edgecolor='black')
+    axs[1, 1].bar(x_pos + bar_width, [rms_u, rms_v, rms_r], bar_width, color=c_9param, edgecolor='black')
+    axs[1, 1].set_ylabel(r'$\mathrm{RMSE \ Error}$')
+    axs[1, 1].set_xticks(x_pos)
+    axs[1, 1].set_xticklabels(categories)
+    axs[1, 1].yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+    axs[1, 1].grid(True, axis='y', linestyle='--', alpha=0.7)
+
+    handles, labels = axs[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='lower center', ncol=4,
+               bbox_to_anchor=(0.5, -0.01), frameon=True, edgecolor='black')
+    plt.tight_layout(rect=[0, 0.05, 1, 1])
+    plot_path = os.path.join(script_dir, 'velocity_comparison_9_parameters_optimized.pdf')
+    plt.savefig(plot_path, format='pdf', dpi=300, bbox_inches='tight')
     plt.close()
     print(f"Saved optimized 9-parameter validation plot to {plot_path}")
 

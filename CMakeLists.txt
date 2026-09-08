@@ -30,4 +30,9 @@ install(DIRECTORY launch config
   OPTIONAL
 )
 
+install(DIRECTORY data
+  DESTINATION .
+  OPTIONAL
+)
+
 ament_package()
