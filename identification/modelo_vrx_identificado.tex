@@ -1,0 +1,103 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish]{babel}
+\usepackage{amsmath,amssymb,booktabs}
+\usepackage[margin=2.5cm]{geometry}
+
+\title{Modelo 3-DOF consistente con \texttt{vrx::SimpleHydrodynamics}}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Convenciones}
+El modelo se expresa en el marco solidario con el vehículo \texttt{base\_link}:
+\begin{equation}
+\nu = [u\;v\;r]^\top,
+\end{equation}
+donde $u$ es surge (eje $+x$), $v$ es sway (eje $+y$) y $r$ es la velocidad de guiñada. Los cuatro propulsores apuntan en $+x$ y se sitúan en $y=\pm0.29\,\mathrm{m}$. Por tanto,
+\begin{equation}
+ T_u=\sum_{i=1}^{4}T_i,\qquad
+ T_r=-\sum_{i=1}^{4}y_iT_i.
+\end{equation}
+
+\section{Modelo estándar de Fossen}
+El modelo planar 3-DOF estándar se escribe como
+\begin{equation}
+ M\dot\nu+C(\nu)\nu+D(\nu)\nu=\tau,
+\end{equation}
+con $M=\mathrm{diag}(m_{11},m_{22},m_{33})$, $\tau=[T_u\;0\;T_r]^\top$ y
+\begin{equation}
+C(\nu)=
+\begin{bmatrix}
+0&0&-m_{22}v\\
+0&0&m_{11}u\\
+m_{22}v&-m_{11}u&0
+\end{bmatrix}.
+\end{equation}
+Con amortiguamiento diagonal cuadrático, sus ecuaciones escalares son
+\begin{align}
+m_{11}\dot u-m_{22}vr+X_u u+X_{uu}|u|u &=T_u,\\
+m_{22}\dot v+m_{11}ur+Y_v v+Y_{vv}|v|v &=0,\\
+m_{33}\dot r+(m_{22}-m_{11})uv+N_r r+N_{rr}|r|r&=T_r.
+\end{align}
+
+\section{Modelo implementado por el simulador tras la corrección}
+El plugin ahora aplica la fuerza de Coriolis de masa añadida estándar
+\begin{equation}
+-C_A(\nu)\nu=
+\begin{bmatrix}
+ Y_{\dot v}vr\\
+ -X_{\dot u}ur\\
+ (X_{\dot u}-Y_{\dot v})uv
+\end{bmatrix},
+\end{equation}
+además de $-M_A\dot\nu-D(\nu)\nu$. Gazebo ya integra la dinámica rígida; por ello, al sumar ambas contribuciones se obtiene exactamente:
+\begin{align}
+ (m+X_{\dot u})\dot u -(m+Y_{\dot v})vr
+   +X_u u+X_{uu}|u|u &= T_u, \\
+ (m+Y_{\dot v})\dot v +(m+X_{\dot u})ur
+   +Y_v v+Y_{vv}|v|v &= 0, \\
+ (I_z+N_{\dot r})\dot r +(Y_{\dot v}-X_{\dot u})uv
+   +N_r r+N_{rr}|r|r &= T_r.
+\end{align}
+
+\section{Comparación actual}
+Con
+\begin{equation}
+m_{11}=m+X_{\dot u},\qquad m_{22}=m+Y_{\dot v},\qquad
+m_{33}=I_z+N_{\dot r},
+\end{equation}
+las tres ecuaciones del simulador corregido son idénticas al modelo estándar de Fossen. Ya no existe una diferencia en los términos $ur$ de sway ni $uv$ de yaw. El identificador de 9 parámetros usa ahora directamente este modelo estándar.
+
+La masa rígida usada es
+\begin{equation}
+m=21.92+4(0.344+0.012)=23.344\,\mathrm{kg},
+\end{equation}
+y el momento rígido de guiñada usado es $I_z=2.923312\,\mathrm{kg\,m^2}$.
+
+\section{Resultado del experimento anterior}
+Estos valores fueron obtenidos antes de corregir el plugin y se conservan solo como referencia; \textbf{no deben utilizarse con el simulador corregido}. Es necesario ejecutar una nueva excitación y volver a identificar. Con \texttt{wamvsim\_20260908\_020709.mat}, la regresión anterior produjo:
+\begin{center}
+\begin{tabular}{@{}lr@{}}
+\toprule
+Parámetro & Valor \\
+\midrule
+$X_{\dot u}$ & $2.015371\,\mathrm{kg}$ \\
+$Y_{\dot v}$ & $7.107892\,\mathrm{kg}$ \\
+$N_{\dot r}$ & $2.296427\,\mathrm{kg\,m^2}$ \\
+$m_{11}=m+X_{\dot u}$ & $25.359371\,\mathrm{kg}$ \\
+$m_{22}=m+Y_{\dot v}$ & $30.451892\,\mathrm{kg}$ \\
+$m_{33}=I_z+N_{\dot r}$ & $5.219739\,\mathrm{kg\,m^2}$ \\
+$X_u$, $X_{uu}$ & $15.673656$, $14.564905$ \\
+$Y_v$, $Y_{vv}$ & $35.470464$, $1.150910$ \\
+$N_r$, $N_{rr}$ & $9.367915$, $0.665270$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+La próxima identificación, obtenida con datos posteriores a la recompilación, será directamente compatible con Fossen y con el plugin.
+
+\end{document}

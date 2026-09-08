@@ -1,0 +1,140 @@
+\section{Model}
+
+The USV kinematics and dynamics are written compactly as
+\begin{equation}
+\dot{\bm\eta} = R(\psi)\bm\nu, \qquad
+M\dot{\bm\nu} + C(\bm\nu)\bm\nu + D\bm\nu = \bm\tau + \bm\tau_{d},
+\label{eq:matrix-form}
+\end{equation}
+with $\bm\eta=(x,y,\psi)^\top$, $\bm\nu=(u,v,r)^\top$, $\bm\tau=(\tau_u,0,\tau_r)^\top$, and $\bm\tau_d=(\tau_{d_u},\tau_{d_v},\tau_{d_r})^\top$ representing disturbances. The matrices are
+\begin{equation}
+R(\psi)=\begin{pmatrix}\cos\psi&-\sin\psi&0\\\sin\psi&\cos\psi&0\\0&0&1\end{pmatrix},
+\end{equation}
+\begin{equation}
+M=\begin{pmatrix}m_{11}&0&0\\0&m_{22}&0\\0&0&m_{33}\end{pmatrix},
+\end{equation}
+\begin{equation}
+C(\bm\nu)=\begin{pmatrix}0&0&-m_{22}v\\0&0&m_{11}u\\m_{22}v&-m_{11}u&0\end{pmatrix},
+\end{equation}
+\begin{equation}
+D=\begin{pmatrix}d_{11}&0&0\\0&d_{22}&0\\0&0&d_{33}\end{pmatrix}.
+\end{equation}
+
+For the ideal case $\bm\tau_d=\bm 0$, expanding \eqref{eq:matrix-form} componentwise gives the scalar equations used throughout the rest of the paper:
+\begin{align}
+\dot x &= u\cos\psi - v\sin\psi \label{eq:xdot}\\
+\dot y &= u\sin\psi + v\cos\psi \label{eq:ydot}\\
+\dot\psi &= r \label{eq:psidot}\\
+m_{11}\dot u &= m_{22}vr - d_{11}u + \tau_u \label{eq:udot}\\
+m_{22}\dot v &= -m_{11}ur - d_{22}v \label{eq:vdot}\\
+m_{33}\dot r &= (m_{11}-m_{22})uv - d_{33}r + \tau_r \label{eq:rdot}
+\end{align}
+
+The state is $(x,y,\psi,u,v,r)$ and the inputs are $(\tau_u,\tau_r)$.
+
+\subsection{Hypothesis 1: $\bm\sigma=(x,y)$}
+
+As the input dimension is $m=2$, the natural first candidate is $\bm\sigma=(x,y)$, matching the classical flat output of unicycle-type kinematics.
+
+From \eqref{eq:xdot}--\eqref{eq:ydot},
+\begin{equation}
+\frac{\partial(\dot x,\dot y)}{\partial(\psi,u,v)}=
+\begin{pmatrix}
+-u\sin\psi-v\cos\psi & \cos\psi & -\sin\psi\\
+u\cos\psi-v\sin\psi & \sin\psi & \cos\psi
+\end{pmatrix} \in \mathbb{R}^{2\times3}.
+\end{equation}
+
+Rank $\leq 2 < 3$, so $\ker\neq\{0\}$.
+
+\begin{proposition}
+$(\delta\psi,\delta u,\delta v)=(\epsilon,\epsilon v,-\epsilon u)\in\ker$.
+\end{proposition}
+\begin{proof}
+\begin{align}
+\delta\dot x &= (-u\sin\psi-v\cos\psi)\epsilon+(\cos\psi)(\epsilon v)+(-\sin\psi)(-\epsilon u)\notag\\
+&=\epsilon[-u\sin\psi-v\cos\psi+v\cos\psi+u\sin\psi]=0,\\
+\delta\dot y &= (u\cos\psi-v\sin\psi)\epsilon+(\sin\psi)(\epsilon v)+(\cos\psi)(-\epsilon u)\notag\\
+&=\epsilon[u\cos\psi-v\sin\psi+v\sin\psi-u\cos\psi]=0.
+\end{align}
+\end{proof}
+
+At first order, $(x,y)$ alone therefore cannot resolve $(\psi,u,v)$; it remains to check whether higher-order derivatives break the degeneracy. Write \eqref{eq:xdot}--\eqref{eq:ydot} in vector form, $\dot{\bm\eta}_{xy}=R_2(\psi)\bm w$, $\bm w=(u,v)^\top$, with $R_2(\psi)$ as in \eqref{eq:matrix-form}. Since
+\begin{equation}
+\dot R_2(\psi)=rR_2(\psi)S,\qquad S=\begin{pmatrix}0&-1\\1&0\end{pmatrix},
+\end{equation}
+differentiating once more gives
+\begin{equation}
+\ddot{\bm\eta}_{xy}=R_2(\psi)\big(\dot{\bm w}+rS\bm w\big).
+\label{eq:eta-second}
+\end{equation}
+Substituting \eqref{eq:udot}--\eqref{eq:vdot} for $\dot{\bm w}$ and $rS\bm w=r(-v,u)^\top$ gives
+\begin{equation}
+R_2(-\psi)\,\ddot{\bm\eta}_{xy}=
+\begin{pmatrix}
+\dfrac{m_{22}-m_{11}}{m_{11}}\,vr-\dfrac{d_{11}u}{m_{11}}+\dfrac{\tau_u}{m_{11}}\\[2mm]
+\dfrac{m_{22}-m_{11}}{m_{22}}\,ur-\dfrac{d_{22}v}{m_{22}}
+\end{pmatrix}.
+\label{eq:key-relation}
+\end{equation}
+
+The second row of \eqref{eq:key-relation} contains no input and, substituting $\psi,u,v,r$ from \eqref{eq:xdot}--\eqref{eq:psidot}, reduces to a relation between $\psi$, $\dot\psi$, and $(x,y,\dot x,\dot y,\ddot x,\ddot y)$ that constrains $\psi(t)$ differentially rather than yielding $\psi$ algebraically from $(x,y)$ and its derivatives at a single instant.
+
+\textbf{Conclusion}: $\bm\sigma=(x,y)$ does not satisfy Definition 1, as $\psi$ cannot be recovered algebraically from the second row of \eqref{eq:key-relation}.
+
+\subsection{Hypothesis 2: $\bm\sigma=(x,y)$, $m_{11}=m_{22}$}
+
+Setting $m_{11}=m_{22}=m$ in \eqref{eq:key-relation}, the mass-difference coefficients vanish, and the system reduces to
+\begin{align}
+\ddot x\cos\psi+\ddot y\sin\psi &= -\frac{d_{11}u}{m}+\frac{\tau_u}{m}, \label{eq:row1-h2}\\
+-\ddot x\sin\psi+\ddot y\cos\psi &= -\frac{d_{22}v}{m}, \label{eq:row2-h2}
+\end{align}
+with $(u,v)$ obtained by inverting the kinematics \eqref{eq:xdot}--\eqref{eq:ydot} through $R_2(-\psi)$.
+
+Substituting $u,v$ in \eqref{eq:row2-h2} gives
+\begin{equation}
+\Big(\ddot y+\frac{d_{22}}{m}\dot y\Big)\cos\psi=\Big(\ddot x+\frac{d_{22}}{m}\dot x\Big)\sin\psi,
+\end{equation}
+so that
+\begin{equation}
+\psi=\operatorname{atan2}\!\Big(\ddot y+\tfrac{d_{22}}{m}\dot y,\ \ddot x+\tfrac{d_{22}}{m}\dot x\Big),
+\label{eq:psi-flat-h2}
+\end{equation}
+algebraic in $(x,y,\dot x,\dot y,\ddot x,\ddot y)$. With $\psi$ given by \eqref{eq:psi-flat-h2} and $(u,v)$ as above, $r=\dot\psi$, and \eqref{eq:row1-h2} and \eqref{eq:rdot} give
+\begin{align}
+\tau_u &= m\big(\ddot x\cos\psi+\ddot y\sin\psi\big)+d_{11}u,\\
+\tau_r &= m_{33}\dot r+d_{33}r,
+\end{align}
+algebraic in derivatives up to third order.
+
+\textbf{Conclusion}: under $m_{11}=m_{22}$, $\bm\sigma=(x,y)$ is a flat output, with
+\begin{equation}
+\Phi:\big(x,y,\dot x,\dot y,\ddot x,\ddot y,\dddot x,\dddot y\big)\longmapsto(\eta,\nu,\tau).
+\end{equation}
+
+\begin{remark}
+The parametrization \eqref{eq:psi-flat-h2} is undefined at $\operatorname{atan2}(0,0)$. Writing $A=\ddot y+\tfrac{d_{22}}{m}\dot y$, $B=\ddot x+\tfrac{d_{22}}{m}\dot x$, one has
+\begin{equation}
+\begin{pmatrix}B\\A\end{pmatrix}=R_2(\psi)\Big(\dot{\bm w}+rS\bm w+\tfrac{d_{22}}{m}\bm w\Big),\qquad \bm w=(u,v)^\top,
+\end{equation}
+and substituting \eqref{eq:vdot} into the second component of the bracket makes it vanish identically, leaving
+\begin{equation}
+\begin{pmatrix}B\\A\end{pmatrix}=X\begin{pmatrix}\cos\psi\\\sin\psi\end{pmatrix},\qquad X=\dot u-rv+\frac{d_{22}}{m}u.
+\end{equation}
+Substituting \eqref{eq:udot} into $X$ gives
+\begin{equation}
+X=\frac{\tau_u+(d_{22}-d_{11})u}{m}.
+\end{equation}
+Since $(\cos\psi,\sin\psi)\neq(0,0)$, the singularity $(B,A)=(0,0)$ occurs exactly when
+\begin{equation}
+\tau_u=(d_{11}-d_{22})\,u.
+\end{equation}
+
+This condition holds whenever $u=0$, i.e. the vehicle rotates in place or holds a fixed position. The flat parametrization cannot generate such maneuvers, since recovering $\psi$ requires $u$ persistently nonzero. In practice, the trajectory generator should be constrained to keep $u\neq0$.
+
+\end{remark}
+
+\begin{remark}
+Under $m_{11}=m_{22}$, the flat parametrization may prescribe a sway reference $v_d(t)$ that the USV cannot achieve. Two solutions appear in the literature: (i) the sway reference is treated as a lower-order term and not explicitly enforced by the controller \cite{Fang2024Symmetry}, or (ii) the desired heading is constrained to the path tangent, $\psi_d=\operatorname{atan2}(\dot y_d,\dot x_d)$, as in \cite{Wang2022Trajectory}, which forces $v_d\equiv0$ by construction.
+\end{remark}
+

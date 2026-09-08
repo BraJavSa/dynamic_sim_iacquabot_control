@@ -1,0 +1,14 @@
+{
+    "full-dynamics": {
+        "m11": 22.539047835019762,
+        "m22": 16.52498167478788,
+        "m33": 2.451874384175241,
+        "Xu": 13.295024256084622,
+        "Xuu": 15.645269946067888,
+        "Yv": 64.25636949455863,
+        "Yvv": 18.610902174715264,
+        "Nr": 5.9638427783585115,
+        "Nrr": 2.9912505913558527,
+        "description": "Standard Fossen 3DOF 9-parameter model optimized via Least Squares + Gradient Descent"
+    }
+}

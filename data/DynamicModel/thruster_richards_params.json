@@ -1,0 +1,33 @@
+{
+    "model_type": "Generalized Logistic (Richards) Thruster Curve Model",
+    "pos": {
+        "A": -12.07098855,
+        "K": 73.72259622,
+        "B": 14.20242467,
+        "M": 0.99474311,
+        "v": 6.83239913,
+        "C": 1.0
+    },
+    "neg": {
+        "A": -70.961086,
+        "K": 7.47710923,
+        "B": 2.69365001,
+        "M": -3.7930382,
+        "v": 0.000409908178,
+        "C": 1.0
+    },
+    "limits": {
+        "max_force_fwd": 65.92,
+        "max_force_rev": -49.38
+    },
+    "units": {
+        "A": "N",
+        "K": "N",
+        "B": "1/cmd",
+        "M": "cmd",
+        "v": "dimensionless",
+        "C": "dimensionless",
+        "max_force_fwd": "N",
+        "max_force_rev": "N"
+    }
+}

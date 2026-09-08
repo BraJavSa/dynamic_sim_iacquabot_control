@@ -1,0 +1,142 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+
+\title{Simplified Fossen Model}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{Kinematic model}
+
+\begin{equation}
+\dot{\boldsymbol{\eta}} = \mathbf{J}(\boldsymbol{\eta})\,\mathbf{v}
+\end{equation}
+
+\section*{Kinetic model (simplified 3-DOF)}
+
+\begin{equation}
+\mathbf{M}\dot{\mathbf{v}} + \mathbf{C}(\mathbf{v})\mathbf{v} + \mathbf{D}(\mathbf{v})\mathbf{v} = \boldsymbol{\tau}
+\end{equation}
+
+Expanded form:
+
+\begin{equation}
+\begin{cases}
+\dot{x} = u\cos\psi - v\sin\psi\\[4pt]
+\dot{y} = u\sin\psi + v\cos\psi\\[4pt]
+\dot{\psi} = r\\[4pt]
+(m-X_{\dot{u}})\,\dot{u} - (m-Y_{\dot{v}})\,vr + X_u\,u = X_{P1}+X_{P2}\\[4pt]
+(m-Y_{\dot{v}})\,\dot{v} + (m-X_{\dot{u}})\,ur + Y_v\,v = 0\\[4pt]
+(I_z-N_{\dot{r}})\,\dot{r} - \big[(m-X_{\dot{u}})-(m-Y_{\dot{v}})\big]uv + N_r\,r = (X_{P1}-X_{P2})\cdot d_P
+\end{cases}
+\end{equation}
+
+\section*{The 6 model parameters}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{clll}
+\toprule
+\# & Parameter & Description & Value \\
+\midrule
+1 & $m_{11}=m-X_{\dot{u}}$ & Effective mass in surge (mass + added mass) & $50.05$ kg \\
+2 & $m_{22}=m-Y_{\dot{v}}$ & Effective mass in sway & $84.36$ kg \\
+3 & $m_{33}=I_z-N_{\dot{r}}$ & Effective inertia in yaw & $17.21$ kg$\cdot$m$^2$ \\
+4 & $X_u$ & Linear drag coefficient in surge & $151.57$ N$\cdot$s/m \\
+5 & $Y_v$ & Linear drag coefficient in sway & $132.5$ N$\cdot$s/m \\
+6 & $N_r$ & Linear drag coefficient in yaw & $34.56$ N$\cdot$m$\cdot$s \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section*{Distance between thrusters}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{cll}
+\toprule
+Parameter & Description & Value \\
+\midrule
+$d_P$ & Transverse distance from the USV centerline to each thruster & $0.26$ m \\
+$B$ & Total distance between the two thrusters ($=2d_P$) & $0.52$ m \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section*{Thrust allocation matrix}
+
+Since the USV has only two thrusters, both aligned with the surge direction ($\alpha_1=\alpha_2=0$), the control vector reduces to two useful components ($\tau_v=0$ at all times, as there is no lateral component):
+
+\begin{equation}
+  \boldsymbol{\tau} = \mathbf{B}\,\mathbf{T}
+\end{equation}
+
+where
+
+\begin{equation}
+  \boldsymbol{\tau} = \begin{bmatrix}\tau_u\\ \tau_r\end{bmatrix}, \qquad
+  \mathbf{T} = \begin{bmatrix}T_1\\ T_2\end{bmatrix}, \qquad
+  \mathbf{B} = \begin{bmatrix}1 & 1\\ d_P & -d_P\end{bmatrix}
+\end{equation}
+
+That is:
+
+\begin{equation}
+  \begin{bmatrix}\tau_u\\ \tau_r\end{bmatrix}
+  =
+  \begin{bmatrix}1 & 1\\ d_P & -d_P\end{bmatrix}
+  \begin{bmatrix}T_1\\ T_2\end{bmatrix}
+\end{equation}
+
+Here $T_1$ and $T_2$ are the port and starboard thruster forces, respectively, and $d_P = 0.26$ m is the transverse distance from each thruster to the USV centerline. Since the number of control inputs equals the number of useful outputs, $\mathbf{B}$ is square (2$\times$2) and the system is not overactuated.
+
+\section*{Thruster thrust model (cmd--thrust curve)}
+
+The actual thruster thrust model is a generalized logistic function, with a dead zone for $|cmd|\leq 0.01$:
+
+\begin{equation}
+T =
+\begin{cases}
+0, & |cmd| \leq 0.01 \\[8pt]
+A_{pos} + \dfrac{K_{pos} - A_{pos}}{\left(C_{pos} + \exp\left(-B_{pos} (cmd - M_{pos})\right)\right)^{\frac{1}{v_{pos}}}}, & cmd > 0.01 \\[12pt]
+A_{neg} + \dfrac{K_{neg} - A_{neg}}{\left(C_{neg} + \exp\left(-B_{neg} (cmd - M_{neg})\right)\right)^{\frac{1}{v_{neg}}}}, & cmd < -0.01
+\end{cases}
+\label{equa:cmd2thrust}
+\end{equation}
+
+\begin{table}[h]
+\centering
+\caption{Optimized parameters for the thrust model}
+\label{tab:t200}
+\begin{tabular}{|c|c||c|c|}
+\hline
+\textbf{Parameter} & \textbf{Value} & \textbf{Parameter} & \textbf{Value} \\
+\hline
+$A_{pos}$ & 0.000001 & $A_{neg}$ & -31.4990 \\
+$K_{pos}$ & 40.0209  & $K_{neg}$ & -0.00001 \\
+$B_{pos}$ & 2.6249   & $B_{neg}$ & 3.6986 \\
+$v_{pos}$ & 0.1615   & $v_{neg}$ & 0.3264 \\
+$C_{pos}$ & 0.9432   & $C_{neg}$ & 0.9713 \\
+$M_{pos}$ & 0.00001  & $M_{neg}$ & -1.0000 \\
+\texttt{maxForceFwd} & 36.3827 N & \texttt{maxForceRev} & -28.4393 N \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection*{5th-degree polynomial approximation}
+
+To simplify implementation in the control model, the logistic curve was approximated with a 5th-degree polynomial over the range $cmd \in [-1,1]$, obtained via least-squares fitting:
+
+\begin{equation}
+T(cmd) \approx -26.557\,cmd^5 + 0.415\,cmd^4 + 46.293\,cmd^3 + 3.732\,cmd^2 + 11.674\,cmd + 0.243
+\end{equation}
+
+
+\end{document}
